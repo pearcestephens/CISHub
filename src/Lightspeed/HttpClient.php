@@ -5,6 +5,7 @@ namespace Queue\Lightspeed;
 
 use Queue\Config;
 use Queue\PdoConnection;
+use Queue\Lightspeed\OAuthClient;
 
 /**
  * HttpClient (Lightspeed Retail X-Series)

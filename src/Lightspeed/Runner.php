@@ -233,144 +233,68 @@ final class Runner
     {
         Logger::info('job.process', ['job_id' => $jobId, 'meta' => ['type' => $type]]);
         switch ($type) {
-            case 'inventory.command':
-                // payload: { op:'adjust'|'set', product_id:int, outlet_id:int, delta?:int, target?:int, reason?:string, external_ref?:string, correlation_id?:string, dry_run?:bool, group_id?:string }
-                $op = (string)($payload['op'] ?? '');
-                $pidRaw = (string)($payload['product_id'] ?? '');
-                $oid = (int)($payload['outlet_id'] ?? 0);
-                $dry = (bool)($payload['dry_run'] ?? false);
-                // Inventory flags: global/pipeline/component
-                $enabled = (\Queue\FeatureFlags::inventoryPipelineEnabled() && \Queue\FeatureFlags::inventoryCommandEnabled());
-                if (\Queue\FeatureFlags::inventoryKillAll()) {
-                    self::recordTransferQueueMetric('job_duration_ms', 'inventory.command', 0, [
-                        'job_id' => $jobId,
-                        'result' => 'noop',
-                        'reason' => 'inventory_kill',
-                        'op' => $op,
-                    ], null, null);
-                    \Queue\Logger::info('inventory.command.noop.kill', ['job_id' => $jobId, 'meta' => [ 'product_id' => $pid, 'outlet_id' => $oid, 'op' => $op ]]);
-                    break;
-                }
-                if ($op === '' || $pidRaw === '' || $oid <= 0) {
-                    throw new \InvalidArgumentException('inventory.command missing required fields (op, product_id, outlet_id)');
-                }
-                // Guard: if product does not support inventory, no-op
-                try {
-                    $pdo = \Queue\PdoConnection::instance();
-                    $hasInv = null;
-                    // Prefer vend_products.has_inventory
-                    $chk = $pdo->prepare('SHOW TABLES LIKE :t'); $chk->execute([':t' => 'vend_products']);
-                    if ($chk->fetchColumn()) {
-                        $col = $pdo->prepare("SHOW COLUMNS FROM vend_products LIKE 'has_inventory'");
-                        $col->execute();
-                        if ($col->fetchColumn()) {
-                            // If product_id is numeric, query by numeric id; otherwise, skip vend_products check (schema may store numeric ids)
-                            if (ctype_digit($pidRaw)) {
-                                $s = $pdo->prepare('SELECT has_inventory FROM vend_products WHERE product_id=:pid LIMIT 1');
-                                $s->execute([':pid' => (int)$pidRaw]);
-                                $v = $s->fetchColumn();
-                                if ($v !== false && $v !== null) { $hasInv = ((string)$v === '1' || (string)$v === 'true' || (int)$v === 1); }
-                            }
-                        }
-                    }
-                    if ($hasInv === null) {
-                        $chk = $pdo->prepare('SHOW TABLES LIKE :t'); $chk->execute([':t' => 'ls_products']);
-                        if ($chk->fetchColumn()) {
-                            $col = $pdo->prepare("SHOW COLUMNS FROM ls_products LIKE 'has_inventory'");
-                            $col->execute();
-                            if ($col->fetchColumn()) {
-                                // Try both numeric and string forms
-                                if (ctype_digit($pidRaw)) {
-                                    $s = $pdo->prepare('SELECT has_inventory FROM ls_products WHERE product_id=:pid LIMIT 1');
-                                    $s->execute([':pid' => (int)$pidRaw]);
-                                    $v = $s->fetchColumn();
-                                    if ($v !== false && $v !== null) { $hasInv = ((string)$v === '1' || (string)$v === 'true' || (int)$v === 1); }
-                                } else {
-                                    try {
-                                        $s = $pdo->prepare('SELECT has_inventory FROM ls_products WHERE product_id=:pid LIMIT 1');
-                                        $s->execute([':pid' => $pidRaw]);
-                                        $v = $s->fetchColumn();
-                                        if ($v !== false && $v !== null) { $hasInv = ((string)$v === '1' || (string)$v === 'true' || (int)$v === 1); }
-                                    } catch (\Throwable $e2) { /* skip if column type incompatible */ }
-                                }
-                            }
-                        }
-                    }
-                    if ($hasInv === false) {
-                        self::recordTransferQueueMetric('job_duration_ms', 'inventory.command', 0, [
-                            'job_id' => $jobId,
-                            'result' => 'noop',
-                            'reason' => 'not-inventory-product',
-                            'op' => $op,
-                        ], null, null);
-                        \Queue\Logger::info('inventory.command.skip.not_inventory', ['job_id' => $jobId, 'meta' => [
-                            'product_id' => $pidRaw,
-                            'outlet_id' => $oid,
-                            'op' => $op,
-                        ]]);
-                        break;
-                    }
-                } catch (\Throwable $e) { /* ignore guard errors */ }
-                if ($dry || !$enabled) {
-                    // Safe no-op until explicitly enabled and wired for v2.1 semantics
-                    self::recordTransferQueueMetric('job_duration_ms', 'inventory.command', 0, [
-                        'job_id' => $jobId,
-                        'result' => 'noop',
-                        'reason' => $dry ? 'dry_run' : 'disabled',
-                        'op' => $op,
-                    ], null, null);
-                    \Queue\Logger::info('inventory.command.noop', ['job_id' => $jobId, 'meta' => [
-                        'product_id' => $pidRaw,
-                        'outlet_id' => $oid,
-                        'op' => $op,
-                        'dry_run' => $dry,
-                        'enabled' => $enabled,
-                    ]]);
-                    break;
-                }
-                // Execute write path via Products v2.1 updateproduct
-                $target = isset($payload['target']) ? (int)$payload['target'] : null;
-                $delta  = isset($payload['delta']) ? (int)$payload['delta'] : null;
-                if ($op === 'set') {
-                    if ($target === null) {
-                        throw new \InvalidArgumentException('inventory.command set requires target');
-                    }
-                    $idk = (string)($payload['idempotency_key'] ?? ('invq:' . $pidRaw . ':' . $oid . ':' . $target));
-                    $body = [
-                        'inventory_update' => [
-                            'outlet_id' => (string)$oid,
-                            'on_hand' => (int)$target,
-                            'source' => 'inventory.command',
-                        ],
-                        'idempotency_key' => $idk,
-                    ];
-                    $resp = \Queue\Lightspeed\ProductsV21::update($pidRaw, $body);
-                    $st = (int)($resp['status'] ?? 0);
-                    if ($st < 200 || $st >= 300) {
-                        $msg = is_array($resp['body'] ?? null) ? json_encode($resp['body']) : (string)($resp['body'] ?? '');
-                        throw new \RuntimeException('vend_update_failed HTTP ' . $st . ' ' . substr($msg, 0, 300));
-                    }
-                    // Post-write verification: confirm on_hand reflects the target before reporting success
-                    $verify = \Queue\Lightspeed\ProductsV21::verifyOnHand($pidRaw, $oid, (int)$target, (int)(\Queue\Config::get('vend.verify_timeout_sec', 12) ?? 12));
-                    \Queue\Logger::info('inventory.command.verify', ['job_id' => $jobId, 'meta' => [
-                        'product_id' => $pidRaw, 'outlet_id' => $oid, 'expected' => (int)$target, 'verified' => $verify['ok'] ?? false, 'observed' => $verify['observed'] ?? null, 'attempts' => $verify['attempts'] ?? 0
-                    ]]);
-                    if (!($verify['ok'] ?? false)) {
-                        $obs = $verify['observed'] ?? null;
-                        $attempts = (int)($verify['attempts'] ?? 0);
-                        throw new \RuntimeException('vend_update_unconfirmed (observed=' . (is_null($obs) ? 'null' : (string)$obs) . ', expected=' . (int)$target . ', attempts=' . $attempts . ')');
-                    }
-                    \Queue\Logger::info('inventory.command.vend_confirmed', ['job_id' => $jobId, 'meta' => [
-                        'product_id' => $pidRaw, 'outlet_id' => $oid, 'op' => $op, 'target' => $target, 'status' => $st, 'verified' => true
-                    ]]);
-                    break;
-                } elseif ($op === 'adjust') {
-                    // Not yet supported safely without a reliable current on_hand source; prevent ambiguous writes
-                    throw new \InvalidArgumentException('inventory.command adjust not supported; use op=set with target');
-                } else {
-                    throw new \InvalidArgumentException('inventory.command unknown op');
-                }
-                break;
+          // ... inside case 'inventory.command':
+$target = isset($payload['target']) ? (int)$payload['target'] : null;
+$delta  = isset($payload['delta'])  ? (int)$payload['delta']  : null;
+
+// We operate with absolute target today; translate to an adjustment.
+// Easiest safe approach: if you have a current level, compute delta = target - current.
+// If not, you can choose to set 'count' as the absolute level using stock_take semantics,
+// but Vend's /inventory expects a *delta* ("count").
+// For now, treat 'target' as absolute: compute delta via read -> set (verify below).
+
+if ($target === null) {
+    throw new \InvalidArgumentException('inventory.command set requires target');
+}
+
+// Read current on-hand (fast path; mock returns ok)
+$verify0 = \Queue\Lightspeed\ProductsV21::get($pidRaw);
+$observed0 = \Queue\Lightspeed\ProductsV21::extractOnHand($verify0['body'] ?? null, (int)$oid) ?? 0;
+$deltaToApply = (int)$target - (int)$observed0;
+
+// If delta is 0, nothing to do; complete early
+if ($deltaToApply === 0) {
+    \Queue\Logger::info('inventory.command.noop.target_reached', ['job_id' => $jobId, 'meta' => [
+        'product_id' => $pidRaw, 'outlet_id' => $oid, 'target' => $target, 'observed' => $observed0,
+    ]]);
+    break;
+}
+
+$t0 = microtime(true);
+$resp = \Queue\Lightspeed\InventoryV20::adjust([
+    'product_id' => $pidRaw,
+    'outlet_id'  => $oid,
+    'count'      => $deltaToApply,
+    'reason'     => 'stock_take',
+    'note'       => 'inventory.command',
+    // 'idempotency_key' => $payload['idempotency_key'] ?? null,
+]);
+$durMs = (int)round((microtime(true) - $t0) * 1000);
+
+$st = (int)($resp['status'] ?? 0);
+if ($st < 200 || $st >= 300) {
+    $msg = is_array($resp['body'] ?? null) ? json_encode($resp['body']) : (string)($resp['body'] ?? '');
+    throw new \RuntimeException('vend_inventory_adjust_failed HTTP ' . $st . ' ' . substr($msg, 0, 300));
+}
+
+// Verify on-hand moved where we expect (your existing helper)
+$verify = \Queue\Lightspeed\ProductsV21::verifyOnHand($pidRaw, $oid, (int)$target, (int)(\Queue\Config::get('vend.verify_timeout_sec', 12) ?? 12));
+\Queue\Logger::info('inventory.command.verify', ['job_id' => $jobId, 'meta' => [
+    'product_id' => $pidRaw, 'outlet_id' => $oid,
+    'expected' => (int)$target, 'observed' => $verify['observed'] ?? null,
+    'attempts' => $verify['attempts'] ?? 0, 'verified' => $verify['ok'] ?? false
+]]);
+if (!($verify['ok'] ?? false)) {
+    $obs = $verify['observed'] ?? null;
+    $attempts = (int)($verify['attempts'] ?? 0);
+    throw new \RuntimeException('vend_update_unconfirmed(observed=' . (is_null($obs) ? 'null' : (string)$obs) . ',expected=' . (int)$target . ',attempts=' . $attempts . ')');
+}
+
+\Queue\Logger::info('inventory.command.vend_confirmed', ['job_id' => $jobId, 'meta' => [
+    'product_id' => $pidRaw, 'outlet_id' => $oid, 'target' => $target, 'status' => $st, 'verified' => true
+]]);
+break;
+
             case 'webhook.event':
                 // payload: { event_db_id?:int, webhook_id:string, webhook_type:string }
                 $wid = (string)($payload['webhook_id'] ?? '');

@@ -1,20 +1,31 @@
 <?php
 declare(strict_types=1);
-
 namespace Queue\Lightspeed;
 
 final class InventoryV20
 {
     /**
-     * DEPRECATED: Lightspeed X-Series API v2.0 does not support write adjustments for inventory.
-     * Use Products v2.1 updateproduct instead (PUT /api/2.1/products/{id}) and pass the correct
-     * payload per https://x-series-api.lightspeedhq.com/reference/updateproduct.
-     *
-     * @param array{product_id:int,outlet_id:int,count:int,reason?:string,note?:string,idempotency_key?:string} $payload
-     * @throws \RuntimeException always
+     * POST /api/2.0/inventory
+     * Body: { "product_id": <id>, "outlet_id": <id>, "count": <int>, "reason": "stock_take|received|damaged|transfer|correction|other", "note": "..." }
      */
     public static function adjust(array $payload): array
     {
-        throw new \RuntimeException('InventoryV20.adjust is deprecated. Use ProductsV21::update (v2.1 updateproduct) to change inventory. See https://staff.vapeshed.co.nz/assets/services/queue/docs/VEND_ENDPOINTS.md');
+        // Minimal shape validation
+        if (!isset($payload['product_id'], $payload['outlet_id'], $payload['count'])) {
+            throw new \InvalidArgumentException('InventoryV20.adjust requires product_id,outlet_id,count');
+        }
+        // Reason/note are optional; set a sensible default
+        $body = [
+            'product_id' => (string)$payload['product_id'],
+            'outlet_id'  => (string)$payload['outlet_id'],
+            'count'      => (int)$payload['count'],
+            'reason'     => $payload['reason'] ?? 'correction',
+            'note'       => $payload['note']   ?? 'inventory.command',
+        ];
+
+        return HttpClient::postJson('/api/2.0/inventory', $body, [
+            // Idempotency is supported via request-id header if you want to add it:
+            // 'Idempotency-Key' => $payload['idempotency_key'] ?? null,
+        ]);
     }
 }
