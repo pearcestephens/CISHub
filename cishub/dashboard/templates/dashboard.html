@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CISHub Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 1rem 2rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .header h1 {
+            font-size: 2rem;
+            font-weight: 300;
+        }
+
+        .header .subtitle {
+            opacity: 0.9;
+            margin-top: 0.5rem;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            border: 1px solid #e1e5e9;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid #f0f0f0;
+        }
+
+        .card-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #2d3748;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-left: auto;
+            animation: pulse 2s infinite;
+        }
+
+        .status-healthy { background-color: #10b981; }
+        .status-degraded { background-color: #f59e0b; }
+        .status-critical { background-color: #ef4444; }
+        .status-unknown { background-color: #6b7280; }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .metric {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid #f7fafc;
+        }
+
+        .metric:last-child {
+            border-bottom: none;
+        }
+
+        .metric-label {
+            font-weight: 500;
+            color: #4a5568;
+        }
+
+        .metric-value {
+            font-weight: 600;
+            color: #2d3748;
+        }
+
+        .component-list {
+            space-y: 0.5rem;
+        }
+
+        .component-item {
+            display: flex;
+            align-items: center;
+            padding: 0.75rem;
+            background: #f8fafc;
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+        }
+
+        .component-status {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 0.75rem;
+        }
+
+        .component-name {
+            font-weight: 500;
+            flex: 1;
+        }
+
+        .component-time {
+            font-size: 0.875rem;
+            color: #6b7280;
+        }
+
+        .alarm-item {
+            display: flex;
+            align-items: center;
+            padding: 1rem;
+            background: #fef2f2;
+            border-left: 4px solid #ef4444;
+            border-radius: 0 8px 8px 0;
+            margin-bottom: 0.75rem;
+        }
+
+        .alarm-item.warning {
+            background: #fffbeb;
+            border-left-color: #f59e0b;
+        }
+
+        .alarm-item.info {
+            background: #eff6ff;
+            border-left-color: #3b82f6;
+        }
+
+        .alarm-content {
+            flex: 1;
+        }
+
+        .alarm-title {
+            font-weight: 600;
+            margin-bottom: 0.25rem;
+        }
+
+        .alarm-description {
+            font-size: 0.875rem;
+            color: #6b7280;
+        }
+
+        .alarm-time {
+            font-size: 0.75rem;
+            color: #9ca3af;
+            margin-top: 0.25rem;
+        }
+
+        .acknowledge-btn {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.875rem;
+            transition: background-color 0.2s;
+        }
+
+        .acknowledge-btn:hover {
+            background: #2563eb;
+        }
+
+        .acknowledge-btn:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+
+        .queue-item {
+            display: flex;
+            align-items: center;
+            padding: 1rem;
+            background: #f8fafc;
+            border-radius: 8px;
+            margin-bottom: 0.75rem;
+        }
+
+        .queue-name {
+            font-weight: 600;
+            flex: 1;
+        }
+
+        .queue-metrics {
+            display: flex;
+            gap: 1rem;
+            font-size: 0.875rem;
+        }
+
+        .queue-metric {
+            color: #6b7280;
+        }
+
+        .connection-status {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-size: 0.875rem;
+            font-weight: 500;
+            z-index: 1000;
+        }
+
+        .connected {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .disconnected {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .loading {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 2rem;
+            color: #6b7280;
+        }
+
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid #e5e7eb;
+            border-top: 2px solid #3b82f6;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 0.5rem;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error-message {
+            background: #fee2e2;
+            color: #991b1b;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 1rem;
+            }
+            
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+                gap: 1rem;
+            }
+            
+            .header {
+                padding: 1rem;
+            }
+            
+            .header h1 {
+                font-size: 1.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <h1>CISHub Dashboard</h1>
+        <div class="subtitle">Real-time monitoring and system status</div>
+    </header>
+
+    <div class="connection-status" id="connectionStatus">
+        <div class="spinner"></div>
+        Connecting...
+    </div>
+
+    <div class="container">
+        <div class="dashboard-grid">
+            <!-- System Health Card -->
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">System Health</h2>
+                    <div class="status-indicator" id="systemHealthIndicator"></div>
+                </div>
+                <div id="systemHealthContent" class="loading">
+                    <div class="spinner"></div>
+                    Loading system health...
+                </div>
+            </div>
+
+            <!-- Queue Status Card -->
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Queue Status</h2>
+                    <div class="status-indicator" id="queueHealthIndicator"></div>
+                </div>
+                <div id="queueStatusContent" class="loading">
+                    <div class="spinner"></div>
+                    Loading queue status...
+                </div>
+            </div>
+
+            <!-- Active Alarms Card -->
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Active Alarms</h2>
+                    <div class="status-indicator" id="alarmHealthIndicator"></div>
+                </div>
+                <div id="activeAlarmsContent" class="loading">
+                    <div class="spinner"></div>
+                    Loading alarms...
+                </div>
+            </div>
+
+            <!-- System Metrics Card -->
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">System Metrics</h2>
+                    <div class="status-indicator status-healthy"></div>
+                </div>
+                <div id="systemMetricsContent" class="loading">
+                    <div class="spinner"></div>
+                    Loading metrics...
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class CISHubDashboard {
+            constructor() {
+                this.ws = null;
+                this.reconnectAttempts = 0;
+                this.maxReconnectAttempts = 10;
+                this.reconnectDelay = 1000;
+                this.init();
+            }
+
+            init() {
+                this.connect();
+                this.setupEventHandlers();
+            }
+
+            connect() {
+                try {
+                    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                    const wsUrl = `${protocol}//${window.location.host}/ws`;
+                    
+                    this.ws = new WebSocket(wsUrl);
+                    
+                    this.ws.onopen = () => {
+                        console.log('WebSocket connected');
+                        this.updateConnectionStatus(true);
+                        this.reconnectAttempts = 0;
+                        
+                        // Subscribe to all data streams
+                        this.subscribe('health');
+                        this.subscribe('queues');
+                        this.subscribe('alarms');
+                    };
+                    
+                    this.ws.onmessage = (event) => {
+                        try {
+                            const message = JSON.parse(event.data);
+                            this.handleMessage(message);
+                        } catch (error) {
+                            console.error('Error parsing WebSocket message:', error);
+                        }
+                    };
+                    
+                    this.ws.onclose = (event) => {
+                        console.log('WebSocket disconnected:', event.code, event.reason);
+                        this.updateConnectionStatus(false);
+                        this.scheduleReconnect();
+                    };
+                    
+                    this.ws.onerror = (error) => {
+                        console.error('WebSocket error:', error);
+                        this.updateConnectionStatus(false);
+                    };
+                    
+                } catch (error) {
+                    console.error('Error creating WebSocket connection:', error);
+                    this.updateConnectionStatus(false);
+                    this.scheduleReconnect();
+                }
+            }
+
+            subscribe(type) {
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.send(JSON.stringify({
+                        type: 'subscribe',
+                        subscription: type
+                    }));
+                }
+            }
+
+            scheduleReconnect() {
+                if (this.reconnectAttempts < this.maxReconnectAttempts) {
+                    this.reconnectAttempts++;
+                    const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
+                    
+                    console.log(`Attempting to reconnect in ${delay}ms (attempt ${this.reconnectAttempts})`);
+                    
+                    setTimeout(() => {
+                        this.connect();
+                    }, delay);
+                } else {
+                    console.error('Max reconnection attempts reached');
+                    this.showError('Connection lost. Please refresh the page.');
+                }
+            }
+
+            updateConnectionStatus(connected) {
+                const statusEl = document.getElementById('connectionStatus');
+                if (connected) {
+                    statusEl.className = 'connection-status connected';
+                    statusEl.innerHTML = '● Connected';
+                } else {
+                    statusEl.className = 'connection-status disconnected';
+                    statusEl.innerHTML = '● Disconnected';
+                }
+            }
+
+            handleMessage(message) {
+                switch (message.type) {
+                    case 'health_update':
+                        this.updateHealthDisplay(message.data);
+                        break;
+                    case 'queue_update':
+                        this.updateQueueDisplay(message.data);
+                        break;
+                    case 'alarm_update':
+                        this.updateAlarmDisplay(message.data);
+                        break;
+                    default:
+                        console.log('Unknown message type:', message.type);
+                }
+            }
+
+            updateHealthDisplay(data) {
+                if (data.error) {
+                    this.showError(data.error, 'systemHealthContent');
+                    return;
+                }
+
+                const indicator = document.getElementById('systemHealthIndicator');
+                const content = document.getElementById('systemMetricsContent');
+                
+                indicator.className = `status-indicator status-${data.overall_status}`;
+                
+                let html = '<div class="component-list">';
+                
+                if (data.components) {
+                    data.components.forEach(component => {
+                        const responseTime = component.response_time_ms ? 
+                            `${Math.round(component.response_time_ms)}ms` : 'N/A';
+                        
+                        html += `
+                            <div class="component-item">
+                                <div class="component-status status-${component.status}"></div>
+                                <div class="component-name">${component.name}</div>
+                                <div class="component-time">${responseTime}</div>
+                            </div>
+                        `;
+                    });
+                }
+                
+                html += '</div>';
+                
+                document.getElementById('systemHealthContent').innerHTML = html;
+                
+                // Update system metrics
+                if (data.system_metrics) {
+                    let metricsHtml = '';
+                    Object.entries(data.system_metrics).forEach(([key, value]) => {
+                        const displayKey = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                        let displayValue = value;
+                        
+                        if (typeof value === 'number') {
+                            if (key.includes('gb')) {
+                                displayValue = `${value.toFixed(2)} GB`;
+                            } else if (key.includes('percent')) {
+                                displayValue = `${value.toFixed(1)}%`;
+                            } else {
+                                displayValue = value.toFixed(2);
+                            }
+                        }
+                        
+                        metricsHtml += `
+                            <div class="metric">
+                                <span class="metric-label">${displayKey}</span>
+                                <span class="metric-value">${displayValue}</span>
+                            </div>
+                        `;
+                    });
+                    
+                    content.innerHTML = metricsHtml;
+                }
+            }
+
+            updateQueueDisplay(data) {
+                if (data.error) {
+                    this.showError(data.error, 'queueStatusContent');
+                    return;
+                }
+
+                const indicator = document.getElementById('queueHealthIndicator');
+                const content = document.getElementById('queueStatusContent');
+                
+                let overallHealthy = true;
+                let html = '';
+                
+                if (data.queues && data.queues.length > 0) {
+                    data.queues.forEach(queue => {
+                        if (!queue.is_healthy) {
+                            overallHealthy = false;
+                        }
+                        
+                        html += `
+                            <div class="queue-item">
+                                <div class="component-status status-${queue.is_healthy ? 'healthy' : 'critical'}"></div>
+                                <div class="queue-name">${queue.name}</div>
+                                <div class="queue-metrics">
+                                    <span class="queue-metric">Pending: ${queue.pending_count}</span>
+                                    <span class="queue-metric">Processing: ${queue.processing_count}</span>
+                                    <span class="queue-metric">Failed: ${queue.failed_count}</span>
+                                </div>
+                            </div>
+                        `;
+                        
+                        if (queue.issues && queue.issues.length > 0) {
+                            queue.issues.forEach(issue => {
+                                html += `<div class="error-message">${issue}</div>`;
+                            });
+                        }
+                    });
+                } else {
+                    html = '<div class="loading">No queues configured</div>';
+                }
+                
+                indicator.className = `status-indicator status-${overallHealthy ? 'healthy' : 'critical'}`;
+                content.innerHTML = html;
+            }
+
+            updateAlarmDisplay(data) {
+                if (data.error) {
+                    this.showError(data.error, 'activeAlarmsContent');
+                    return;
+                }
+
+                const indicator = document.getElementById('alarmHealthIndicator');
+                const content = document.getElementById('activeAlarmsContent');
+                
+                let html = '';
+                
+                if (data.alarms && data.alarms.length > 0) {
+                    const criticalCount = data.summary?.critical || 0;
+                    const errorCount = data.summary?.error || 0;
+                    
+                    let indicatorStatus = 'healthy';
+                    if (criticalCount > 0) {
+                        indicatorStatus = 'critical';
+                    } else if (errorCount > 0) {
+                        indicatorStatus = 'degraded';
+                    }
+                    
+                    indicator.className = `status-indicator status-${indicatorStatus}`;
+                    
+                    data.alarms.forEach(alarm => {
+                        const severity = alarm.severity || 'warning';
+                        const triggeredAt = new Date(alarm.triggered_at).toLocaleString();
+                        
+                        html += `
+                            <div class="alarm-item ${severity}">
+                                <div class="alarm-content">
+                                    <div class="alarm-title">${alarm.title}</div>
+                                    <div class="alarm-description">${alarm.description}</div>
+                                    <div class="alarm-time">Triggered: ${triggeredAt}</div>
+                                </div>
+                                ${!alarm.acknowledged ? 
+                                    `<button class="acknowledge-btn" onclick="dashboard.acknowledgeAlarm(${alarm.id})">
+                                        Acknowledge
+                                    </button>` : 
+                                    '<span style="color: #10b981; font-size: 0.875rem;">✓ Acknowledged</span>'
+                                }
+                            </div>
+                        `;
+                    });
+                } else {
+                    indicator.className = 'status-indicator status-healthy';
+                    html = '<div class="loading">No active alarms</div>';
+                }
+                
+                content.innerHTML = html;
+            }
+
+            async acknowledgeAlarm(alarmId) {
+                try {
+                    const response = await fetch(`/api/dashboard/alarms/${alarmId}/acknowledge`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            acknowledged_by: 'dashboard_user'
+                        })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        console.log('Alarm acknowledged successfully');
+                        // The UI will update automatically via WebSocket
+                    } else {
+                        console.error('Failed to acknowledge alarm:', result.message);
+                        alert('Failed to acknowledge alarm: ' + result.message);
+                    }
+                } catch (error) {
+                    console.error('Error acknowledging alarm:', error);
+                    alert('Error acknowledging alarm. Please try again.');
+                }
+            }
+
+            showError(message, containerId = null) {
+                const errorHtml = `<div class="error-message">${message}</div>`;
+                
+                if (containerId) {
+                    document.getElementById(containerId).innerHTML = errorHtml;
+                } else {
+                    // Show global error
+                    const container = document.querySelector('.container');
+                    container.insertAdjacentHTML('afterbegin', errorHtml);
+                }
+            }
+
+            setupEventHandlers() {
+                // Handle page visibility changes
+                document.addEventListener('visibilitychange', () => {
+                    if (document.visibilityState === 'visible' && 
+                        (!this.ws || this.ws.readyState !== WebSocket.OPEN)) {
+                        this.connect();
+                    }
+                });
+                
+                // Handle window focus
+                window.addEventListener('focus', () => {
+                    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+                        this.connect();
+                    }
+                });
+            }
+        }
+
+        // Initialize dashboard when page loads
+        const dashboard = new CISHubDashboard();
+    </script>
+</body>
+</html>
