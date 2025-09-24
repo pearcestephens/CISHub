@@ -22,7 +22,6 @@ if (!function_exists('h')) {
 }
 
 require_once __DIR__ . '/src/PdoConnection.php';
-require_once __DIR__ . '/src/Lightspeed/Runner.php';
 require_once __DIR__ . '/src/PdoWorkItemRepository.php';
 
 if (session_status() !== PHP_SESSION_ACTIVE) { @session_start(); }
@@ -36,8 +35,16 @@ $qs_csrf = $_SESSION['qs_csrf'];
 			$kickMsg = 'CSRF check failed.';
 		} else {
 			if ($act === 'kick') {
-				try { Queue\Lightspeed\Runner::run(['--limit' => 5]); $kickMsg = 'Runner kicked (processed up to 5 jobs).'; }
-				catch (Throwable $e) { $kickMsg = 'Runner error: ' . h($e->getMessage()); }
+				try {
+					$php = PHP_BINARY ?: 'php';
+					$bin = realpath(__DIR__ . '/bin/run-jobs.php');
+					$out = []; $rc = 0;
+					if ($bin && is_file($bin)) {
+						@exec(escapeshellcmd($php) . ' ' . escapeshellarg($bin) . ' --limit=5 2>&1', $out, $rc);
+						$tail = $out ? implode("\n", array_slice($out, -3)) : '';
+						$kickMsg = 'Runner executed (limit 5). Exit=' . (int)$rc . ($tail !== '' ? (' — ' . h($tail)) : '');
+					} else { $kickMsg = 'Runner script not found.'; }
+				} catch (Throwable $e) { $kickMsg = 'Runner error: ' . h($e->getMessage()); }
 			}
 			if ($act === 'test_inv_dry') {
 				try {
@@ -127,7 +134,7 @@ try {
 	try {
 		$lastRecvAge = (int)$pdo->query("SELECT IFNULL(TIMESTAMPDIFF(SECOND, MAX(received_at), NOW()), 999999) FROM webhook_events")->fetchColumn();
 		$failRecent = 0;
-		try { $failRecent = (int)$pdo->query("SELECT COUNT(*) FROM webhook_health WHERE check_time >= NOW() - INTERVAL 30 MINUTE AND health_status IN ('warning','fail','failed')")->fetchColumn(); } catch (\Throwable $e) {}
+	try { $failRecent = (int)$pdo->query("SELECT COUNT(*) FROM webhook_health WHERE check_time >= NOW() - INTERVAL 30 MINUTE AND health_status IN ('warning','critical')")->fetchColumn(); } catch (\Throwable $e) {}
 		if ($lastRecvAge <= 600 && $failRecent === 0) { $webhookStatus = 'HEALTHY'; }
 		elseif ($lastRecvAge <= 1800) { $webhookStatus = 'WARNING'; $webhookNote = 'Last event >10m or recent warnings'; }
 		else { $webhookStatus = 'STALE'; $webhookNote = 'No recent webhooks received'; }

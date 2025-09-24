@@ -7,6 +7,7 @@ require_once __DIR__ . '/../src/FeatureFlags.php';
 require_once __DIR__ . '/../src/Logger.php';
 require_once __DIR__ . '/../src/WorkItem.php';
 require_once __DIR__ . '/../src/PdoWorkItemRepository.php';
+require_once __DIR__ . '/../src/Http.php';
 require_once __DIR__ . '/../src/Lightspeed/OAuthClient.php';
 require_once __DIR__ . '/../src/Lightspeed/HttpClient.php';
 require_once __DIR__ . '/../src/Lightspeed/InventoryV20.php';
@@ -16,7 +17,16 @@ require_once __DIR__ . '/../src/Lightspeed/Runner.php';
 
 function parse_args(array $argv): array {
     $out = [];
-    foreach ($argv as $a) if (strpos($a,'--')===0 && strpos($a,'=')!==false) { [$k,$v]=explode('=',$a,2); $out[$k]=$v; }
+    foreach ($argv as $a) {
+        if (strpos($a, '--') !== 0) { continue; }
+        if (strpos($a, '=') !== false) {
+            [$k, $v] = explode('=', $a, 2);
+            $out[$k] = $v;
+        } else {
+            // Treat bare flags as boolean true
+            $out[$a] = true;
+        }
+    }
     return $out;
 }
 

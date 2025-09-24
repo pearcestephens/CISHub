@@ -108,44 +108,9 @@ final class Http
 
     public static function ensureAuth(): bool
     {
-        // Allow local CLI scripts to bypass HTTP auth safely
-        if (PHP_SAPI === 'cli') {
-            return true;
-        }
-        // Guard: if config cannot be read due to DB outage, operate in open mode for read-only endpoints
-        try {
-            $expected = (string) (Config::get('ADMIN_BEARER_TOKEN', '') ?? '');
-        } catch (\Throwable $e) {
-            $expected = '';
-        }
-        if ($expected === '') return true; // no auth configured
-        $authz = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-        if (stripos($authz, 'Bearer ') !== 0) { self::error('unauthorized', 'Missing bearer token', null, 401); return false; }
-        $given = trim(substr($authz, 7));
-        // Accept current token first
-        if (!hash_equals($expected, $given)) {
-            // Accept any permanent tokens defined as a JSON array
-            try {
-                $perms = Config::get('ADMIN_BEARER_TOKENS', []);
-                if (is_string($perms)) { $decoded = json_decode($perms, true); if (is_array($decoded)) { $perms = $decoded; } }
-                if (is_array($perms)) {
-                    foreach ($perms as $pt) {
-                        if (!is_string($pt) || $pt === '') continue;
-                        if (hash_equals($pt, $given)) { header('X-Auth-Using: permanent'); return true; }
-                    }
-                }
-            } catch (\Throwable $e) { /* ignore */ }
-            // Gracefully accept previous token within expiry window
-            $prev = (string) (Config::get('ADMIN_BEARER_TOKEN_PREV', '') ?? '');
-            $prevExp = (int) (Config::get('ADMIN_BEARER_TOKEN_PREV_EXPIRES_AT', 0) ?? 0);
-            $now = time();
-            if ($prev !== '' && $prevExp > 0 && $now <= $prevExp && hash_equals($prev, $given)) {
-                header('X-Auth-Using: previous');
-                header('X-Auth-Prev-Expires-At: ' . $prevExp);
-                return true;
-            }
-            self::error('unauthorized', 'Invalid bearer token', null, 401); return false;
-        }
+        // INCIDENT MODE: HTTP auth fully disabled as requested. All requests are allowed.
+        // Note: This bypasses bearer checks entirely, including for write endpoints.
+        // Ensure this is reverted when incident ends.
         return true;
     }
 

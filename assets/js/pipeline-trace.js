@@ -1,96 +1,83 @@
 (function(){
-  'use strict';
-
-  function h(s){ return String(s==null?'':s); }
-  function qs(sel, el){ return (el||document).querySelector(sel); }
-  function qsa(sel, el){ return Array.from((el||document).querySelectorAll(sel)); }
-
-  function parseQuery(){
-    const p = new URLSearchParams(location.search);
-    return {
-      trace: p.get('trace')||'',
-      job: parseInt(p.get('job')||'0',10)||0,
-      refresh: parseInt(p.get('refresh')||'5',10)||0
-    };
+  function qs(name, def=''){
+    const u = new URL(location.href);
+    return u.searchParams.get(name) || def;
   }
 
-  async function loadData(){
-    const { trace, job } = parseQuery();
-    const u = new URL('/assets/services/queue/public/pipeline.trace.data.php', location.origin);
-    if(trace) u.searchParams.set('trace', trace);
-    if(job>0) u.searchParams.set('job', String(job));
-    u.searchParams.set('since','240');
-    const res = await fetch(u.toString(), { headers: { 'Accept':'application/json' }, cache: 'no-store' });
-    if(!res.ok) throw new Error('HTTP '+res.status);
-    return res.json();
-  }
+  const trace = qs('trace','').trim();
+  const job   = parseInt(qs('job','0'), 10) || 0;
+  const since = 240; // minutes
 
-  function renderSummary(data){
-    const el = qs('#traceSummary'); if(!el) return;
-    const parts = [];
-    if(data.trace) parts.push('trace_id='+h(data.trace));
-    if(data.job) parts.push('job_id='+h(data.job));
-    el.textContent = parts.join(' · ');
-  }
+  if (!trace && !job) return; // form shows help
 
-  function classify(msg){
-    const s = (msg||'').toLowerCase();
-    if(s.includes('failed')||s.includes('error')||s.includes('exception')) return 'danger';
-    if(s.includes('retry')||s.includes('warn')) return 'warning';
-    if(s.includes('completed')||s.includes('enqueue')||s.includes('success')) return 'success';
-    return 'secondary';
-  }
+  const url = `/assets/services/queue/public/pipeline.trace.data.php?trace=${encodeURIComponent(trace)}&job=${job}&since=${since}`;
+  const table = document.getElementById('traceTable').querySelector('tbody');
+  const summary = document.getElementById('traceSummary');
+  const spark = document.getElementById('traceSpark');
 
-  function renderTable(data){
-    const tbody = qs('#traceTable tbody'); if(!tbody) return;
-    tbody.innerHTML = '';
-    (data.events||[]).forEach(ev => {
-      const tr = document.createElement('tr');
-      const sev = classify(ev.message||'');
-      tr.innerHTML = `
-        <td><span class="badge bg-${sev}">&nbsp;</span> ${h(ev.time||'')}</td>
-        <td>${h(ev.stage||'')}</td>
-        <td style="white-space:pre-wrap">${h(ev.message||'')}</td>
-        <td>${h(ev.source||'')}</td>
+  fetch(url, {cache:'no-store'})
+    .then(r => r.json())
+    .then(j => {
+      if (!j || !j.ok) throw new Error('Failed to load trace');
+
+      const events = j.events || [];
+
+      // Summary
+      const first = events[0]?.time || '';
+      const last  = events[events.length-1]?.time || '';
+      const stages = [...new Set(events.map(e => e.stage))];
+      summary.innerHTML = `
+        <div><span class="kv">Events:</span> ${events.length}</div>
+        <div><span class="kv">Stages:</span> ${stages.join(', ') || '—'}</div>
+        <div class="text-muted small mt-1">from ${first || '—'} to ${last || '—'}</div>
       `;
-      tbody.appendChild(tr);
+
+      // Rows
+      const frag = document.createDocumentFragment();
+      events.forEach(e => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td class="mono">${(e.time || '').replace('T',' ').replace('Z','')}</td>
+          <td class="mono">${e.stage || ''}</td>
+          <td class="mono" style="white-space:pre-wrap;">${(e.message || '').toString().slice(0,400)}</td>
+          <td class="mono">${e.source || ''}</td>
+        `;
+        frag.appendChild(tr);
+      });
+      table.innerHTML = ''; table.appendChild(frag);
+
+      // Sparkline (events per slice)
+      if (spark && spark.getContext) {
+        const ctx = spark.getContext('2d');
+        const w = spark.clientWidth || 300, h = spark.height;
+        spark.width = w;
+
+        const buckets = 32;
+        const counts = new Array(buckets).fill(0);
+        const t0 = Date.now();
+        events.forEach((e) => {
+          const ts = new Date(e.time || Date.now()).getTime();
+          const diff = Math.max(0, t0 - ts);
+          const slot = Math.min(buckets-1, Math.floor((diff / (since*60*1000)) * buckets));
+          counts[buckets-1-slot]++;
+        });
+
+        const max = Math.max.apply(null, counts) || 1;
+        const step = w / (buckets-1);
+
+        ctx.clearRect(0,0,w,h);
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#6ea8fe';
+        ctx.beginPath();
+        counts.forEach((v,i) => {
+          const x = i*step;
+          const y = h - (v/max)*(h-6) - 3;
+          if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+        });
+        ctx.stroke();
+      }
+    })
+    .catch(e=>{
+      summary.textContent = 'Failed to load trace: ' + (e?.message||e);
     });
-  }
-
-  function renderViz(data){
-    const el = qs('#pipelineViz'); if(!el) return;
-    const stages = ['Submit Handler','Queue','Runner','Worker','Webhook Intake'];
-    const seen = new Set((data.events||[]).map(e=>e.stage));
-    const html = stages.map(st => {
-      const ok = seen.has(st);
-      const cls = ok? 'bg-success' : 'bg-secondary';
-      return `<div class="d-inline-flex align-items-center me-2 mb-2">
-        <span class="badge ${cls} status-dot"></span>
-        <span class="ms-2">${h(st)}</span>
-      </div>`;
-    }).join('');
-    el.innerHTML = html;
-  }
-
-  async function tick(){
-    try{
-      const data = await loadData();
-      renderSummary(data);
-      renderViz(data);
-      renderTable(data);
-    }catch(err){
-      console.error('trace load failed', err);
-    }
-  }
-
-  function setupAutoRefresh(){
-    const { refresh } = parseQuery();
-    if(refresh>0){ setInterval(tick, refresh*1000); }
-  }
-
-  // boot
-  document.addEventListener('DOMContentLoaded', () => {
-    tick();
-    setupAutoRefresh();
-  });
 })();

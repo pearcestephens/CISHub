@@ -27,23 +27,38 @@ final class OAuthClient
         $access = (string) (cfg('vend_access_token', '') ?? '');
         $expiresAt = (int) (cfg('vend_expires_at', 0) ?? 0);
         $now = time();
-        if ($access !== '' && $expiresAt > ($now + 120)) {
+        // Accept permanent tokens (expires_at = 0) or non-expired tokens
+        if ($access !== '' && ($expiresAt === 0 || $expiresAt > ($now + 120))) {
             return $access;
         }
-        // Try refresh first if present
+
+        // If we don't have a valid token and no domain prefix is configured,
+        // avoid attempting refresh/exchange which requires the token endpoint.
+        $prefix = (string) (cfg('vend_domain_prefix', '') ?? '');
+
+        // Try refresh first if present and we have a domain prefix
         $refresh = (string) (cfg('vend_refresh_token', '') ?? '');
-        if ($refresh !== '') {
+        if ($refresh !== '' && $prefix !== '') {
             $ok = self::refresh($refresh);
             if ($ok !== '') {
                 return $ok;
             }
         }
-        // Fallback to authorization_code flow
+
+        // Fallback to authorization_code flow only if prefix is available
         $authCode = (string) (cfg('vend_auth_code', '') ?? '');
-        if ($authCode === '') {
-            throw new RuntimeException('No valid token and missing vend_auth_code to obtain one.');
+        if ($authCode !== '' && $prefix !== '') {
+            return self::exchangeAuthCode($authCode);
         }
-        return self::exchangeAuthCode($authCode);
+
+        // As a last resort, if we still have an access token value but it appears expired
+        // and we cannot refresh/exchange due to missing prefix, return it to allow
+        // downstream calls to proceed. Many environments use permanent tokens without expiry.
+        if ($access !== '') {
+            return $access;
+        }
+
+        throw new RuntimeException('No valid vend_access_token and token refresh/exchange unavailable (missing vend_domain_prefix).');
     }
 
     public static function exchangeAuthCode(string $code): string

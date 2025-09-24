@@ -1,0 +1,8 @@
+/.env
+/backups/
+migrations/failed/
+logs/
+*.log
+*.tmp
+.DS_Store
+vendor/

@@ -1,101 +1,101 @@
 <?php
 declare(strict_types=1);
 /**
- * File: assets/services/queue/public/queue.status.php
- * Purpose: Human-friendly queue dashboard: interprets metrics, shows live counts/ages, recent failures, and a safe kick-runner action.
- * Author: CIS Queue
- * Last Modified: 2025-09-22
- * Dependencies: app.php, PdoConnection, Config, Runner
+ * Queue Status (public)
+ * Simple HTML status page for staff operators. Includes a safe kick button.
  */
 
-// Bootstrap CIS app/session safely
+// Bootstrap session and optional app include
 try {
     if (!isset($_SERVER['DOCUMENT_ROOT'])) { $_SERVER['DOCUMENT_ROOT'] = dirname(__DIR__, 4); }
     $appPath = rtrim((string)($_SERVER['DOCUMENT_ROOT'] ?? ''), '/') . '/app.php';
     if (is_file($appPath)) { require_once $appPath; }
-} catch (Throwable $e) { /* best-effort include */ }
+} catch (Throwable $e) {}
 
 require_once __DIR__ . '/../src/PdoConnection.php';
 require_once __DIR__ . '/../src/Config.php';
-require_once __DIR__ . '/../src/Lightspeed/Runner.php';
 
-use Queue\PdoConnection;
-use Queue\Lightspeed\Runner;
+use Queue\PdoConnection; use Queue\Config;
 
-// Start session and gate to staff context
 if (session_status() !== PHP_SESSION_ACTIVE) { @session_start(); }
+$publicAllowed = false; try { $publicAllowed = Config::getBool('queue.dashboard.public', false); } catch (\Throwable $e) { $publicAllowed = false; }
 $isStaff = isset($_SESSION['userID']) && (int)$_SESSION['userID'] > 0;
-if (!$isStaff) {
-    http_response_code(403);
-    echo '<!doctype html><meta charset="utf-8"><title>Forbidden</title><p>Staff session required.</p>';
-    exit;
-}
+if (!$isStaff && !$publicAllowed) { http_response_code(403); echo '<!doctype html><meta charset="utf-8"><title>Forbidden</title><p>Staff session required.</p>'; exit; }
 
-// Simple CSRF for actions
 if (empty($_SESSION['qs_csrf'])) { $_SESSION['qs_csrf'] = bin2hex(random_bytes(16)); }
 $csrf = $_SESSION['qs_csrf'];
 
-// Optional kick-runner action (bounded)
 $actionMsg = null;
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
-    $tok = $_POST['csrf'] ?? '';
-    if (!hash_equals($csrf, (string)$tok)) {
-        $actionMsg = 'CSRF check failed.';
-    } else {
-        try {
-            // Process a small batch to nudge the queue
-            Runner::run(['--limit' => 5]);
-            $actionMsg = 'Runner kicked (processed up to 5 jobs).';
-        } catch (Throwable $e) {
-            $actionMsg = 'Runner error: ' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8');
+    $tok = (string)($_POST['csrf'] ?? '');
+    if (!hash_equals($csrf, $tok)) { $actionMsg = 'CSRF check failed.'; }
+    else {
+    $do = (string)($_POST['do'] ?? 'kick');
+    try {
+      if ($do === 'reap') {
+        // Best-effort: call reaper scripts to release stale leases/working
+        $out = [];
+        $php = PHP_BINARY ?: 'php';
+        $base = realpath(__DIR__ . '/../bin');
+        if ($base) {
+          @exec(escapeshellcmd($php) . ' ' . escapeshellarg($base . '/reap-stale.php') . ' 2>&1', $out);
+          @exec(escapeshellcmd($php) . ' ' . escapeshellarg($base . '/reap-working.php') . ' 2>&1', $out);
         }
+        $actionMsg = 'Reaper executed. ' . (count($out) ? h(implode("\n", array_slice($out, -3))) : '');
+      } else {
+        // Spawn the CLI runner for a short burst (limit 5) to avoid in-process class dependency issues
+        $out = [];
+        $rc = 0;
+        $php = PHP_BINARY ?: 'php';
+        $bin = realpath(__DIR__ . '/../bin/run-jobs.php');
+        if ($bin && is_file($bin)) {
+          @exec(escapeshellcmd($php) . ' ' . escapeshellarg($bin) . ' --limit=5 2>&1', $out, $rc);
+          $tail = $out ? implode("\n", array_slice($out, -3)) : '';
+          $actionMsg = 'Runner executed (limit 5). Exit=' . (int)$rc . ($tail !== '' ? (' — ' . h($tail)) : '');
+        } else {
+          $actionMsg = 'Runner script not found.';
+        }
+      }
+    }
+        catch (Throwable $e) { $actionMsg = 'Runner error: ' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8'); }
     }
 }
 
 $pdo = PdoConnection::instance();
+$pendingTotal = 0; $workingTotal = 0; $failedTotal = 0; $dlqTotal = 0; $oldestPendingAge = 0; $longestWorkingAge = 0; $byType = [];
+try { $pendingTotal = (int)$pdo->query("SELECT COUNT(*) FROM ls_jobs WHERE status='pending'")->fetchColumn(); } catch (Throwable $e) {}
+try { $workingTotal = (int)$pdo->query("SELECT COUNT(*) FROM ls_jobs WHERE status IN ('working','running')")->fetchColumn(); } catch (Throwable $e) {}
+try { $failedTotal  = (int)$pdo->query("SELECT COUNT(*) FROM ls_jobs WHERE status='failed'")->fetchColumn(); } catch (Throwable $e) {}
+try { $dlqTotal     = (int)$pdo->query("SELECT COUNT(*) FROM ls_jobs_dlq")->fetchColumn(); } catch (Throwable $e) {}
+try { $oldestPendingAge = (int)$pdo->query("SELECT IFNULL(TIMESTAMPDIFF(SECOND, MIN(created_at), NOW()),0) FROM ls_jobs WHERE status='pending'")->fetchColumn(); } catch (Throwable $e) {}
+try { $longestWorkingAge = (int)$pdo->query("SELECT IFNULL(TIMESTAMPDIFF(SECOND, MIN(started_at), NOW()),0) FROM ls_jobs WHERE status IN ('working','running')")->fetchColumn(); } catch (Throwable $e) {}
+try { $byType = $pdo->query("SELECT type, COUNT(*) c FROM ls_jobs WHERE status='pending' GROUP BY type ORDER BY c DESC LIMIT 10")->fetchAll(PDO::FETCH_ASSOC) ?: []; } catch (Throwable $e) {}
 
-// Query counts
-$pendingTotal = (int)($pdo->query("SELECT COUNT(*) FROM ls_work_items WHERE status='pending'")->fetchColumn() ?: 0);
-$workingTotal = (int)($pdo->query("SELECT COUNT(*) FROM ls_work_items WHERE status='working'")->fetchColumn() ?: 0);
-$failedTotal  = (int)($pdo->query("SELECT COUNT(*) FROM ls_work_items WHERE status='failed'")->fetchColumn() ?: 0);
-$dlqTotal     = (int)($pdo->query("SELECT COUNT(*) FROM ls_work_items WHERE status='dlq'")->fetchColumn() ?: 0);
-
-// Ages
-$oldestPendingAge = (int)($pdo->query("SELECT TIMESTAMPDIFF(SECOND, MIN(created_at), NOW()) FROM ls_work_items WHERE status='pending'")->fetchColumn() ?: 0);
-$longestWorkingAge = (int)($pdo->query("SELECT TIMESTAMPDIFF(SECOND, MIN(locked_at), NOW()) FROM ls_work_items WHERE status='working'")->fetchColumn() ?: 0);
-
-// Pending by type (top 10)
-$stmt = $pdo->query("SELECT type, COUNT(*) c FROM ls_work_items WHERE status='pending' GROUP BY type ORDER BY c DESC LIMIT 10");
-$byType = $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : [];
-
-// Recent validation failures (job_id=0)
-$stmt2 = $pdo->query("SELECT id, created_at, log_message FROM ls_job_logs WHERE job_id=0 ORDER BY id DESC LIMIT 20");
 $recentFails = [];
-if ($stmt2) {
-    while ($r = $stmt2->fetch(PDO::FETCH_ASSOC)) {
-        $payload = $r['log_message'];
-        $j = null; try { $j = json_decode($payload, true, 512, JSON_THROW_ON_ERROR); } catch (Throwable $e) { $j = null; }
-        $recentFails[] = [
-            'id' => (int)$r['id'],
-            'ts' => (string)$r['created_at'],
-            'event' => (string)($j['event'] ?? 'log'),
-            'reason' => (string)($j['reason'] ?? ''),
-            'pid' => (string)($j['pid'] ?? ''),
-            'oid' => (string)($j['oid'] ?? ''),
-            'oid2' => (string)($j['oid2'] ?? ''),
-            'qty' => (string)($j['qty'] ?? ($j['qty_in'] ?? '')),
-        ];
+try {
+    if ($st = $pdo->query("SELECT id, created_at, log_message FROM ls_job_logs WHERE job_id=0 ORDER BY id DESC LIMIT 20")) {
+        while ($r = $st->fetch(PDO::FETCH_ASSOC)) {
+            $j = null; try { $j = json_decode((string)$r['log_message'], true, 512, JSON_THROW_ON_ERROR); } catch (Throwable $e) {}
+            $recentFails[] = [
+                'ts' => (string)($r['created_at'] ?? ''),
+                'event' => (string)($j['event'] ?? 'log'),
+                'reason' => (string)($j['reason'] ?? ''),
+                'pid' => (string)($j['pid'] ?? ''),
+                'oid' => (string)($j['oid'] ?? ''),
+                'oid2' => (string)($j['oid2'] ?? ''),
+                'qty' => (string)($j['qty'] ?? ($j['qty_in'] ?? '')),
+            ];
+        }
     }
-}
+} catch (Throwable $e) {}
 
-// Derive status
 $status = 'OK'; $note = '';
 if ($pendingTotal > 0 && $workingTotal === 0) { $status = 'ATTENTION'; $note = 'Jobs pending but no workers active — cron/runner may be idle.'; }
-if ($oldestPendingAge > 1800) { $status = 'DEGRADED'; $note = 'Oldest pending job is older than 30 minutes; backlog likely.'; }
+if ($oldestPendingAge > 1800) { $status = 'DEGRADED'; $note = 'Oldest pending job > 30 minutes.'; }
 
 function h(string $s): string { return htmlspecialchars($s, ENT_QUOTES, 'UTF-8'); }
-
-?><!doctype html>
+?>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -123,11 +123,7 @@ function h(string $s): string { return htmlspecialchars($s, ENT_QUOTES, 'UTF-8')
       <div class="alert alert-info py-2"><?php echo h($actionMsg); ?></div>
     <?php endif; ?>
 
-    <?php
-      $cls = 'status-ok';
-      if ($status === 'ATTENTION') $cls = 'status-attn';
-      if ($status === 'DEGRADED') $cls = 'status-deg';
-    ?>
+    <?php $cls = ($status==='DEGRADED'?'status-deg':($status==='ATTENTION'?'status-attn':'status-ok')); ?>
     <div class="card <?php echo $cls; ?>">
       <div class="card-body">
         <div class="row">
@@ -140,10 +136,27 @@ function h(string $s): string { return htmlspecialchars($s, ENT_QUOTES, 'UTF-8')
           <div class="col-md-4 text-md-right mt-3 mt-md-0">
             <form method="post" class="d-inline">
               <input type="hidden" name="csrf" value="<?php echo h($csrf); ?>">
+              <input type="hidden" name="do" value="kick">
               <button class="btn btn-sm btn-primary" type="submit">Kick runner (limit 5)</button>
+            </form>
+            <form method="post" class="d-inline ml-2">
+              <input type="hidden" name="csrf" value="<?php echo h($csrf); ?>">
+              <input type="hidden" name="do" value="reap">
+              <button class="btn btn-sm btn-outline-danger" type="submit" onclick="return confirm('Reap stale jobs (working/leased) back to pending?)');">Reap stale</button>
             </form>
           </div>
         </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">Stale diagnostics</div>
+      <div class="card-body">
+        <ul class="mb-0">
+          <li>Oldest pending age: <strong><?php echo (int)$oldestPendingAge; ?></strong> sec</li>
+          <li>Longest working age: <strong><?php echo (int)$longestWorkingAge; ?></strong> sec</li>
+          <li class="text-muted">Tip: If Working is high and completions remain 0, try "Reap stale" to reset long-running jobs.</li>
+        </ul>
       </div>
     </div>
 
@@ -193,10 +206,3 @@ function h(string $s): string { return htmlspecialchars($s, ENT_QUOTES, 'UTF-8')
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.2.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
-<?php
-declare(strict_types=1);
-require_once __DIR__ . '/../src/PdoConnection.php';
-require_once __DIR__ . '/../src/Config.php';
-require_once __DIR__ . '/../src/Lightspeed/Web.php';
-require_once __DIR__ . '/../src/Http.php';
-\Queue\Lightspeed\Web::status();

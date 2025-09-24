@@ -522,8 +522,16 @@ final class Web
     {
         $db = 'down';
         try { PdoConnection::instance()->query('SELECT 1'); $db = 'ok'; } catch (\Throwable $e) {}
-        $exp = (int) (Config::get('vend_token_expires_at', 0) ?? 0);
-        $left = $exp - time();
+        // Support alternate key styles for expiry (underscore and dot)
+        $expRaw = Config::get('vend_token_expires_at', null);
+        if ($expRaw === null || $expRaw === '') { $expRaw = Config::get('vend.token.expires_at', 0); }
+        $exp = is_numeric($expRaw) ? (int)$expRaw : (int)($expRaw ?? 0);
+        $left = $exp === 0 ? null : ($exp - time());
+        // If dot-notation vend.access_token exists and no underscore token, treat as active even if expires_at missing
+        try {
+            $hasDotToken = (string)(Config::get('vend.access_token', '') ?? '') !== '';
+            if ($hasDotToken && ($expRaw === null || $expRaw === '' || (int)$exp === 0)) { $left = null; }
+        } catch (\Throwable $e) { /* ignore */ }
         $counts = ['pending'=>0,'working'=>0,'failed'=>0];
         $dlq = 0; $oldest = 0; $longest = 0; $cursorStatus = [];
         try {
@@ -569,7 +577,7 @@ final class Web
                 'vend.queue.auto_kick.enabled' => (bool) Config::getBool('vend.queue.auto_kick.enabled', true),
             ];
         } catch (\Throwable $e) { /* ignore flag fetch errors */ }
-        Http::respond(true, [ 'db'=>$db, 'token_expires_in'=>$left, 'jobs'=>$counts, 'dlq_count'=>$dlq, 'oldest_pending_age_sec'=>$oldest, 'longest_working_age_sec'=>$longest, 'cursor_status'=>$cursorStatus, 'flags'=>$flags ]);
+    Http::respond(true, [ 'db'=>$db, 'token_expires_in'=>$left, 'jobs'=>$counts, 'dlq_count'=>$dlq, 'oldest_pending_age_sec'=>$oldest, 'longest_working_age_sec'=>$longest, 'cursor_status'=>$cursorStatus, 'flags'=>$flags ]);
     }
 
     /** Enqueue a job (create_consignment|update_consignment|push_product_update|...) */
@@ -714,13 +722,12 @@ final class Web
 
         $webhookIdHeader = $_SERVER['HTTP_X_LS_WEBHOOK_ID'] ?? null;
         // Signature verification: prefer X-Signature (signature=...,algorithm=HMAC-SHA256) using body-only; fallback to legacy timestamp.body
-        if (!$openActive && $shared !== '') {
+    if (!$openActive && $shared !== '') {
             if ($timestamp !== '' && abs(time() - (int)$timestamp) > 300) {
                 // Soft-fail: record but continue processing
                 $authState = 'stale';
                 try {
-                    $pdo = PdoConnection::instance(); $wid = $webhookIdHeader ?: sha1(((string)$timestamp) . '.' . $body);
-                    $ip = $_SERVER['REMOTE_ADDR'] ?? ''; $ua = $_SERVER['HTTP_USER_AGENT'] ?? '';
+                    $pdo = PdoConnection::instance();
                     $pdo->prepare("INSERT INTO webhook_health (check_time, webhook_type, health_status, response_time_ms, consecutive_failures, health_details) VALUES (NOW(), 'vend.webhook', 'warning', 0, 1, JSON_OBJECT('reason','stale_timestamp'))")->execute();
                     $pdo->prepare("INSERT INTO webhook_stats (recorded_at, webhook_type, metric_name, metric_value, time_period) VALUES (FROM_UNIXTIME(UNIX_TIMESTAMP() - MOD(UNIX_TIMESTAMP(),60)), 'vend.webhook', 'failed_count', 1, '1min') ON DUPLICATE KEY UPDATE metric_value = metric_value + 1")->execute();
                 } catch (\Throwable $e) {}
@@ -769,11 +776,23 @@ final class Web
                 } catch (\Throwable $e) {}
             } else {
                 $authState = 'verified';
+                // Mark healthy event receipt
+                try {
+                    $pdo = PdoConnection::instance();
+                    // Use 'healthy' to match ENUM('healthy','warning','critical','unknown')
+                    $pdo->prepare("INSERT INTO webhook_health (check_time, webhook_type, health_status, response_time_ms, consecutive_failures) VALUES (NOW(), 'vend.webhook', 'healthy', 0, 0)")->execute();
+                    $pdo->prepare("INSERT INTO webhook_stats (recorded_at, webhook_type, metric_name, metric_value, time_period) VALUES (FROM_UNIXTIME(UNIX_TIMESTAMP() - MOD(UNIX_TIMESTAMP(),60)), 'vend.webhook', 'received_count', 1, '1min') ON DUPLICATE KEY UPDATE metric_value = metric_value + 1")->execute();
+                } catch (\Throwable $e) {}
             }
         }
         if ($openActive) {
             // Signal in response and captured headers that auth was bypassed intentionally (open mode)
             $authState = 'open';
+            try {
+                $pdo = PdoConnection::instance();
+                // Use 'healthy' for open mode success as well
+                $pdo->prepare("INSERT INTO webhook_health (check_time, webhook_type, health_status, response_time_ms, consecutive_failures, health_details) VALUES (NOW(), 'vend.webhook', 'healthy', 0, 0, JSON_OBJECT('reason','open_mode'))")->execute();
+            } catch (\Throwable $e) {}
         }
         if ($authState !== 'none') {
             header('X-Webhook-Auth: ' . $authState);
