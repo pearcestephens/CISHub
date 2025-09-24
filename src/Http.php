@@ -21,6 +21,29 @@ final class Http
         header('Referrer-Policy: no-referrer');
         header('X-Content-Type-Options: nosniff');
         self::requestId();
+        // Attach global health/degrade signal headers for all JSON endpoints
+        try {
+            // System banner (if Degrade exists and active)
+            if (class_exists('\\Queue\\Degrade')) {
+                $b = \Queue\Degrade::banner();
+                $active = (bool)($b['active'] ?? false);
+                header('X-CIS-Banner-Active: ' . ($active ? '1' : '0'));
+                if (!empty($b['level'])) { header('X-CIS-Banner-Level: ' . (string)$b['level']); }
+                if (!empty($b['message'])) {
+                    $msg = (string)$b['message'];
+                    $msg = str_replace(["\r","\n"], ' ', $msg);
+                    if (strlen($msg) > 512) { $msg = substr($msg, 0, 512); }
+                    header('X-CIS-Banner-Message: ' . $msg);
+                }
+            }
+            // Core degrade flags
+            if (class_exists('\\Queue\\Config')) {
+                $ro = \Queue\Config::getBool('ui.readonly', false);
+                header('X-CIS-Readonly: ' . ($ro ? '1' : '0'));
+                $qq = \Queue\Config::getBool('ui.disable.quick_qty', false);
+                header('X-CIS-Feature-QuickQty-Disabled: ' . ($qq ? '1' : '0'));
+            }
+        } catch (\Throwable $e) { /* non-fatal */ }
     }
 
     public static function commonTextHeaders(): void
@@ -28,6 +51,27 @@ final class Http
         header('Referrer-Policy: no-referrer');
         header('X-Content-Type-Options: nosniff');
         self::requestId();
+        // Mirror degrade status for text endpoints too
+        try {
+            if (class_exists('\\Queue\\Degrade')) {
+                $b = \Queue\Degrade::banner();
+                $active = (bool)($b['active'] ?? false);
+                header('X-CIS-Banner-Active: ' . ($active ? '1' : '0'));
+                if (!empty($b['level'])) { header('X-CIS-Banner-Level: ' . (string)$b['level']); }
+                if (!empty($b['message'])) {
+                    $msg = (string)$b['message'];
+                    $msg = str_replace(["\r","\n"], ' ', $msg);
+                    if (strlen($msg) > 512) { $msg = substr($msg, 0, 512); }
+                    header('X-CIS-Banner-Message: ' . $msg);
+                }
+            }
+            if (class_exists('\\Queue\\Config')) {
+                $ro = \Queue\Config::getBool('ui.readonly', false);
+                header('X-CIS-Readonly: ' . ($ro ? '1' : '0'));
+                $qq = \Queue\Config::getBool('ui.disable.quick_qty', false);
+                header('X-CIS-Feature-QuickQty-Disabled: ' . ($qq ? '1' : '0'));
+            }
+        } catch (\Throwable $e) { /* ignore */ }
     }
 
     public static function respond(bool $ok, ?array $data = null, ?array $error = null, int $status = 200): void

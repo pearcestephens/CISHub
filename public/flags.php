@@ -3,7 +3,8 @@ declare(strict_types=1);
 require_once __DIR__ . '/../src/PdoConnection.php';
 require_once __DIR__ . '/../src/Config.php';
 require_once __DIR__ . '/../src/FeatureFlags.php';
-header('Content-Type: application/json; charset=utf-8');
+require_once __DIR__ . '/../src/Http.php';
+\Queue\Http::commonJsonHeaders();
 echo json_encode([
   'ok' => true,
   'flags' => \Queue\FeatureFlags::snapshot(),

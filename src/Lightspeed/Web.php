@@ -30,9 +30,44 @@ final class Web
             // Snapshot queue
             $pending = (int)($pdo->query("SELECT COUNT(*) FROM ls_jobs WHERE status='pending'")->fetchColumn() ?: 0);
             $working = (int)($pdo->query("SELECT COUNT(*) FROM ls_jobs WHERE status='working' OR status='running'")->fetchColumn() ?: 0);
-            $done1m = (int)($pdo->query("SELECT COUNT(*) FROM ls_jobs WHERE (status='done' OR status='completed') AND (finished_at >= NOW() - INTERVAL 1 MINUTE OR completed_at >= NOW() - INTERVAL 1 MINUTE)")->fetchColumn() ?: 0);
-            $lastStartedAt = (string)($pdo->query("SELECT DATE_FORMAT(IFNULL(MAX(started_at),'0000-00-00 00:00:00'), '%Y-%m-%d %H:%i:%s') FROM ls_jobs WHERE (status='working' OR status='running')")->fetchColumn() ?: '');
-            $lastCompletedAt = (string)($pdo->query("SELECT DATE_FORMAT(GREATEST(IFNULL(MAX(finished_at),'0000-00-00 00:00:00'), IFNULL(MAX(completed_at),'0000-00-00 00:00:00')), '%Y-%m-%d %H:%i:%s') FROM ls_jobs WHERE status IN ('done','completed')")->fetchColumn() ?: '');
+            // Determine available timestamp columns safely
+            $hasCol = static function(string $name) use ($pdo): bool {
+                try { $s=$pdo->prepare("SHOW COLUMNS FROM ls_jobs LIKE :c"); $s->execute([':c'=>$name]); return (bool)$s->fetchColumn(); } catch (\Throwable $e) { return false; }
+            };
+            $hasFinished = $hasCol('finished_at');
+            $hasCompleted = $hasCol('completed_at');
+            $hasUpdated = $hasCol('updated_at');
+            // done in last minute: prefer finished/completed, else fallback to updated_at for done/completed statuses
+            $done1m = 0;
+            try {
+                if ($hasFinished || $hasCompleted) {
+                    $parts = [];
+                    if ($hasFinished) { $parts[] = "finished_at >= NOW() - INTERVAL 1 MINUTE"; }
+                    if ($hasCompleted) { $parts[] = "completed_at >= NOW() - INTERVAL 1 MINUTE"; }
+                    $cond = implode(' OR ', $parts);
+                    $done1m = (int)$pdo->query("SELECT COUNT(*) FROM ls_jobs WHERE (status='done' OR status='completed') AND (".$cond.")")->fetchColumn();
+                } elseif ($hasUpdated) {
+                    $done1m = (int)$pdo->query("SELECT COUNT(*) FROM ls_jobs WHERE (status='done' OR status='completed') AND updated_at >= NOW() - INTERVAL 1 MINUTE")->fetchColumn();
+                }
+            } catch (\Throwable $e) { $done1m = 0; }
+            // last started at
+            $lastStartedAt = null;
+            try { $lastStartedAt = (string)($pdo->query("SELECT DATE_FORMAT(IFNULL(MAX(started_at),'0000-00-00 00:00:00'), '%Y-%m-%d %H:%i:%s') FROM ls_jobs WHERE (status='working' OR status='running')")->fetchColumn() ?: ''); } catch (\Throwable $e) { $lastStartedAt = null; }
+            // last completed at
+            $lastCompletedAt = null;
+            try {
+                if ($hasFinished || $hasCompleted) {
+                    $parts = [];
+                    if ($hasFinished) { $parts[] = "IFNULL(MAX(finished_at),'0000-00-00 00:00:00')"; }
+                    if ($hasCompleted) { $parts[] = "IFNULL(MAX(completed_at),'0000-00-00 00:00:00')"; }
+                    $expr = count($parts) > 1 ? ('GREATEST(' . implode(',', $parts) . ')') : $parts[0];
+                    $sql = "SELECT DATE_FORMAT(".$expr.", '%Y-%m-%d %H:%i:%s') FROM ls_jobs WHERE status IN ('done','completed')";
+                    $lastCompletedAt = (string)($pdo->query($sql)->fetchColumn() ?: '');
+                } elseif ($hasUpdated) {
+                    $sql = "SELECT DATE_FORMAT(IFNULL(MAX(updated_at),'0000-00-00 00:00:00'), '%Y-%m-%d %H:%i:%s') FROM ls_jobs WHERE status IN ('done','completed')";
+                    $lastCompletedAt = (string)($pdo->query($sql)->fetchColumn() ?: '');
+                }
+            } catch (\Throwable $e) { $lastCompletedAt = null; }
             // Snapshot webhooks
             $webhookProcAge = null; $webhookRecvAge = null;
             try {
