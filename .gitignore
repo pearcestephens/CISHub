@@ -1,7 +1,6 @@
 /.env
 /backups/
-migrations/failed/
-logs/
+/logs/
 *.log
 *.tmp
 .DS_Store
