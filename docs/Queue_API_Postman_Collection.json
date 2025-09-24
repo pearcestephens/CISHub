@@ -1,0 +1,219 @@
+{
+  "info": {
+    "name": "CIS Queue & Webhooks API",
+    "description": "Postman collection for https://staff.vapeshed.co.nz/assets/services/queue/public endpoints. See full docs at https://staff.vapeshed.co.nz/assets/services/queue/docs/API_REFERENCE.md",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "https://staff.vapeshed.co.nz/assets/services/queue/public", "type": "string" },
+    { "key": "adminBearer", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Public",
+      "item": [
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "header": [ { "key": "Accept", "value": "application/json" } ],
+            "url": { "raw": "{{baseUrl}}/health.php", "host": ["{{baseUrl}}"], "path": ["health.php"] }
+          }
+        },
+        {
+          "name": "Enqueue Job (add consignment products)",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Authorization", "value": "Bearer {{adminBearer}}" }, { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"type\": \"add_consignment_products\",\n  \"payload\": { \"consignment_id\": 987654, \"lines\": [ { \"product_id\": 12345, \"qty\": 4, \"sku\": \"ABC-001\" } ], \"idempotency_key\": \"cons:987654:add:2025-09-20\" }\n}" },
+            "url": { "raw": "{{baseUrl}}/job.php", "host": ["{{baseUrl}}"], "path": ["job.php"] }
+          }
+        },
+        {
+          "name": "Metrics (Prometheus)",
+          "request": {
+            "method": "GET",
+            "header": [ { "key": "Accept", "value": "text/plain" } ],
+            "url": { "raw": "{{baseUrl}}/metrics.php", "host": ["{{baseUrl}}"], "path": ["metrics.php"] }
+          }
+        },
+        {
+          "name": "Dashboard (HTML)",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/dashboard.php", "host": ["{{baseUrl}}"], "path": ["dashboard.php"] }
+          }
+        },
+        {
+          "name": "Verify (tables)",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/verify.php", "host": ["{{baseUrl}}"], "path": ["verify.php"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin",
+      "item": [
+        {
+          "name": "Queue Status",
+          "request": {
+            "method": "GET",
+            "header": [ { "key": "Authorization", "value": "Bearer {{adminBearer}}" }, { "key": "Accept", "value": "application/json" } ],
+            "url": { "raw": "{{baseUrl}}/queue.status.php", "host": ["{{baseUrl}}"], "path": ["queue.status.php"] }
+          }
+        },
+        {
+          "name": "Pause Type",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Authorization", "value": "Bearer {{adminBearer}}" }, { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"type\": \"create_consignment\"\n}" },
+            "url": { "raw": "{{baseUrl}}/queue.pause.php", "host": ["{{baseUrl}}"], "path": ["queue.pause.php"] }
+          }
+        },
+        {
+          "name": "Resume Type",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Authorization", "value": "Bearer {{adminBearer}}" }, { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"type\": \"create_consignment\"\n}" },
+            "url": { "raw": "{{baseUrl}}/queue.resume.php", "host": ["{{baseUrl}}"], "path": ["queue.resume.php"] }
+          }
+        },
+        {
+          "name": "Update Concurrency",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Authorization", "value": "Bearer {{adminBearer}}" }, { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"type\": \"create_consignment\",\n  \"cap\": 25\n}" },
+            "url": { "raw": "{{baseUrl}}/queue.concurrency.update.php", "host": ["{{baseUrl}}"], "path": ["queue.concurrency.update.php"] }
+          }
+        },
+        {
+          "name": "Enqueue Job (product update)",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Authorization", "value": "Bearer {{adminBearer}}" }, { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"type\": \"push_product_update\",\n  \"payload\": { \"product_id\": 123, \"data\": { /* updateproduct v2.1 fields */ } },\n  \"priority\": 3,\n  \"idempotency_key\": \"product:123:update:stock\"\n}" },
+            "url": { "raw": "{{baseUrl}}/job.php", "host": ["{{baseUrl}}"], "path": ["job.php"] }
+          }
+        },
+        {
+          "name": "DLQ Redrive (oldest 100)",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Authorization", "value": "Bearer {{adminBearer}}" }, { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"mode\": \"oldest\",\n  \"limit\": 100\n}" },
+            "url": { "raw": "{{baseUrl}}/dlq.redrive.php", "host": ["{{baseUrl}}"], "path": ["dlq.redrive.php"] }
+          }
+        },
+        {
+          "name": "Migrate",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Authorization", "value": "Bearer {{adminBearer}}" } ],
+            "url": { "raw": "{{baseUrl}}/migrate.php", "host": ["{{baseUrl}}"], "path": ["migrate.php"] }
+          }
+        },
+        {
+          "name": "Manual Token Refresh",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Authorization", "value": "Bearer {{adminBearer}}" } ],
+            "url": { "raw": "{{baseUrl}}/manual.refresh_token.php", "host": ["{{baseUrl}}"], "path": ["manual.refresh_token.php"] }
+          }
+        },
+        {
+          "name": "Keys Rotate (admin bearer)",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Authorization", "value": "Bearer {{adminBearer}}" }, { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"target\": \"admin_bearer\",\n  \"overlap_minutes\": 60,\n  \"show_secret\": true\n}" },
+            "url": { "raw": "{{baseUrl}}/keys.rotate.php", "host": ["{{baseUrl}}"], "path": ["keys.rotate.php"] }
+          }
+        },
+        {
+          "name": "Transfer Cleanup Cache (dry run)",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Authorization", "value": "Bearer {{adminBearer}}" }, { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"limit\": 1000,\n  \"dry_run\": true\n}" },
+            "url": { "raw": "{{baseUrl}}/transfer.cleanup_cache.php", "host": ["{{baseUrl}}"], "path": ["transfer.cleanup_cache.php"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Webhooks",
+      "item": [
+        {
+          "name": "Receiver (Vend → us)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-LS-Timestamp", "value": "{{timestamp}}" },
+              { "key": "X-LS-Signature", "value": "<computed-hmac>" },
+              { "key": "X-LS-Webhook-Id", "value": "test-webhook" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"event\": \"inventory.update\",\n  \"data\": { \"id\": 123 }\n}" },
+            "url": { "raw": "{{baseUrl}}/webhook.php", "host": ["{{baseUrl}}"], "path": ["webhook.php"] },
+            "description": "Requires valid Lightspeed HMAC. See https://staff.vapeshed.co.nz/assets/services/queue/docs/WEBHOOKS.md"
+          }
+        },
+        {
+          "name": "Subscriptions (list)",
+          "request": {
+            "method": "GET",
+            "header": [ { "key": "Authorization", "value": "Bearer {{adminBearer}}" }, { "key": "Accept", "value": "application/json" } ],
+            "url": { "raw": "{{baseUrl}}/webhook.subscriptions.php", "host": ["{{baseUrl}}"], "path": ["webhook.subscriptions.php"] }
+          }
+        },
+        {
+          "name": "Subscriptions Update",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Authorization", "value": "Bearer {{adminBearer}}" }, { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"id\": 1,\n  \"is_active\": true\n}" },
+            "url": { "raw": "{{baseUrl}}/webhook.subscriptions.update.php", "host": ["{{baseUrl}}"], "path": ["webhook.subscriptions.update.php"] }
+          }
+        },
+        {
+          "name": "Events (last 50)",
+          "request": {
+            "method": "GET",
+            "header": [ { "key": "Authorization", "value": "Bearer {{adminBearer}}" }, { "key": "Accept", "value": "application/json" } ],
+            "url": { "raw": "{{baseUrl}}/webhook.events.php?limit=50", "host": ["{{baseUrl}}"], "path": ["webhook.events.php"], "query": [ { "key": "limit", "value": "50" } ] }
+          }
+        },
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "header": [ { "key": "Authorization", "value": "Bearer {{adminBearer}}" }, { "key": "Accept", "value": "application/json" } ],
+            "url": { "raw": "{{baseUrl}}/webhook.health.php", "host": ["{{baseUrl}}"], "path": ["webhook.health.php"] }
+          }
+        },
+        {
+          "name": "Stats",
+          "request": {
+            "method": "GET",
+            "header": [ { "key": "Authorization", "value": "Bearer {{adminBearer}}" }, { "key": "Accept", "value": "application/json" } ],
+            "url": { "raw": "{{baseUrl}}/webhook.stats.php", "host": ["{{baseUrl}}"], "path": ["webhook.stats.php"] }
+          }
+        },
+        {
+          "name": "Replay",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Authorization", "value": "Bearer {{adminBearer}}" }, { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"ids\": [101,102],\n  \"reason\": \"backfill\"\n}" },
+            "url": { "raw": "{{baseUrl}}/webhook.replay.php", "host": ["{{baseUrl}}"], "path": ["webhook.replay.php"] }
+          }
+        }
+      ]
+    }
+  ]
+}

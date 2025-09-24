@@ -1,0 +1,82 @@
+CREATE TABLE `webhook_events` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `webhook_id` varchar(128) NOT NULL COMMENT 'Unique webhook identifier',
+  `webhook_type` varchar(64) NOT NULL COMMENT 'Type of webhook (sale.update, product.update, etc.)',
+  `payload` longtext NOT NULL COMMENT 'Processed webhook payload',
+  `raw_payload` longtext NOT NULL COMMENT 'Original raw webhook data',
+  `source_ip` varchar(45) DEFAULT NULL COMMENT 'IP address of webhook sender',
+  `user_agent` text DEFAULT NULL COMMENT 'User agent of webhook sender',
+  `headers` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'HTTP headers from webhook request' CHECK (json_valid(`headers`)),
+  `status` enum('received','processing','completed','failed','replayed') NOT NULL DEFAULT 'received',
+  `received_at` timestamp NOT NULL DEFAULT current_timestamp() COMMENT 'When webhook was received',
+  `processed_at` timestamp NULL DEFAULT NULL COMMENT 'When webhook processing completed',
+  `processing_attempts` int(10) unsigned NOT NULL DEFAULT 0 COMMENT 'Number of processing attempts',
+  `processing_result` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'Result data from successful processing' CHECK (json_valid(`processing_result`)),
+  `error_message` text DEFAULT NULL COMMENT 'Error message if processing failed',
+  `queue_job_id` varchar(64) DEFAULT NULL COMMENT 'Associated queue job ID',
+  `replayed_from` varchar(128) DEFAULT NULL COMMENT 'Original webhook_id if this is a replay',
+  `replay_reason` varchar(255) DEFAULT NULL COMMENT 'Reason for manual replay',
+  `replayed_by_user` int(10) unsigned DEFAULT NULL COMMENT 'User who triggered replay',
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `webhook_id` (`webhook_id`),
+  KEY `idx_webhook_type_status` (`webhook_type`,`status`),
+  KEY `idx_received_at` (`received_at`),
+  KEY `idx_status_processing` (`status`,`processing_attempts`),
+  KEY `idx_source_tracking` (`source_ip`,`received_at`),
+  KEY `idx_queue_job` (`queue_job_id`),
+  KEY `idx_replay_chain` (`replayed_from`)
+) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Webhook events audit trail and replay system';
+
+CREATE TABLE `webhook_subscriptions` (
+  `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+  `source_system` varchar(32) NOT NULL DEFAULT 'vend' COMMENT 'Source system (vend, website, wholesale)',
+  `event_type` varchar(64) NOT NULL COMMENT 'Event type pattern (sale.*, product.update, etc.)',
+  `endpoint_url` varchar(512) NOT NULL COMMENT 'Our webhook endpoint URL',
+  `is_active` tinyint(1) NOT NULL DEFAULT 1 COMMENT 'Whether subscription is active',
+  `secret_key` varchar(256) DEFAULT NULL COMMENT 'Secret key for signature verification',
+  `external_subscription_id` varchar(128) DEFAULT NULL COMMENT 'ID in external system',
+  `created_in_external_system` timestamp NULL DEFAULT NULL COMMENT 'When created in external system',
+  `last_verified` timestamp NULL DEFAULT NULL COMMENT 'Last time subscription was verified',
+  `events_received_today` int(10) unsigned NOT NULL DEFAULT 0 COMMENT 'Events received today',
+  `events_received_total` bigint(20) unsigned NOT NULL DEFAULT 0 COMMENT 'Total events received',
+  `last_event_received` timestamp NULL DEFAULT NULL COMMENT 'When last event was received',
+  `health_status` enum('healthy','warning','critical','unknown') NOT NULL DEFAULT 'unknown',
+  `health_message` text DEFAULT NULL COMMENT 'Health status description',
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `unique_subscription` (`source_system`,`event_type`,`endpoint_url`),
+  KEY `idx_active_subscriptions` (`is_active`,`source_system`),
+  KEY `idx_health_monitoring` (`health_status`,`last_event_received`)
+) ENGINE=InnoDB AUTO_INCREMENT=8 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Webhook subscription management and health monitoring';
+
+CREATE TABLE `webhook_stats` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `recorded_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `webhook_type` varchar(64) NOT NULL,
+  `metric_name` varchar(64) NOT NULL COMMENT 'received_count, processed_count, failed_count, avg_processing_time',
+  `metric_value` decimal(10,2) NOT NULL,
+  `time_period` enum('1min','5min','15min','1hour','1day') NOT NULL DEFAULT '5min',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `unique_metric_period` (`recorded_at`,`webhook_type`,`metric_name`,`time_period`),
+  KEY `idx_time_lookup` (`recorded_at`,`webhook_type`,`metric_name`),
+  KEY `idx_webhook_period` (`webhook_type`,`time_period`,`recorded_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Webhook processing performance metrics';
+
+CREATE TABLE `webhook_health` (
+  `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+  `check_time` timestamp NOT NULL DEFAULT current_timestamp(),
+  `webhook_type` varchar(64) NOT NULL,
+  `health_status` enum('healthy','warning','critical','unknown') NOT NULL DEFAULT 'unknown',
+  `response_time_ms` int(10) unsigned DEFAULT NULL COMMENT 'Processing response time in milliseconds',
+  `error_rate_pct` decimal(5,2) DEFAULT NULL COMMENT 'Error percentage over last hour',
+  `throughput_per_hour` int(10) unsigned DEFAULT NULL COMMENT 'Webhooks processed per hour',
+  `last_successful_at` timestamp NULL DEFAULT NULL COMMENT 'Last successful webhook processing',
+  `consecutive_failures` int(10) unsigned NOT NULL DEFAULT 0,
+  `health_details` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'Detailed health check information' CHECK (json_valid(`health_details`)),
+  PRIMARY KEY (`id`),
+  KEY `idx_type_time` (`webhook_type`,`check_time`),
+  KEY `idx_health_status` (`health_status`,`check_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Webhook system health monitoring';

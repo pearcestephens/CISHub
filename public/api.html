@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CIS Queue & Webhooks API</title>
+  <meta name="description" content="Human-friendly index for the CIS Queue & Webhooks API endpoints" />
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, "Noto Sans", sans-serif; margin: 24px; line-height: 1.5; }
+    h1 { margin-top: 0; }
+    code { background: #f6f8fa; padding: 2px 4px; border-radius: 4px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+    .card { border: 1px solid #e1e4e8; border-radius: 8px; padding: 16px; background: #fff; }
+    .muted { color: #6a737d; font-size: 0.95em; }
+    ul { padding-left: 18px; }
+    a { color: #0366d6; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <h1>CIS Queue & Webhooks API</h1>
+  <p class="muted">
+    Base path: <code>https://staff.vapeshed.co.nz/assets/services/queue/public/</code> · Documentation: 
+    <a href="https://staff.vapeshed.co.nz/assets/services/queue/docs/API_REFERENCE.md">API Reference</a> ·
+    <a href="https://staff.vapeshed.co.nz/assets/services/queue/docs/WEBHOOKS.md">Webhooks</a> ·
+    <a href="https://staff.vapeshed.co.nz/assets/services/queue/docs/OPERATIONS.md">Operations</a> ·
+    <a href="https://staff.vapeshed.co.nz/assets/services/queue/docs/METRICS.md">Metrics</a>
+    · <a href="https://staff.vapeshed.co.nz/assets/services/queue/docs/NAMING_MODULES.md">Naming & Modules</a>
+  </p>
+
+  <div class="grid">
+    <div class="card">
+      <h3>Public</h3>
+      <ul>
+        <li><a href="https://staff.vapeshed.co.nz/assets/services/queue/public/health.php">GET health.php</a> — service health</li>
+        <li><a href="https://staff.vapeshed.co.nz/assets/services/queue/public/metrics.php">GET metrics.php</a> — Prometheus metrics</li>
+        <li><a href="https://staff.vapeshed.co.nz/assets/services/queue/public/dashboard.php">GET dashboard.php</a> — HTML dashboard</li>
+        <li><a href="https://staff.vapeshed.co.nz/assets/services/queue/public/verify.php">GET verify.php</a> — verify tables</li>
+        <li><a href="https://staff.vapeshed.co.nz/assets/services/queue/public/db.sanity.php">GET db.sanity.php</a> — DB sanity (auth required)</li>
+  <li><a href="https://staff.vapeshed.co.nz/assets/services/queue/public/db.monitor.php">GET db.monitor.php</a> — DB monitor (auth required)</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h3>Admin (Bearer)</h3>
+      <ul>
+        <li><a href="https://staff.vapeshed.co.nz/assets/services/queue/public/queue.status.php">GET queue.status.php</a></li>
+        <li>POST queue.pause.php — body: { "type": "..." }</li>
+        <li>POST queue.resume.php — body: { "type": "..." }</li>
+        <li>POST queue.concurrency.update.php — body: { "type": "...", "cap": N }</li>
+        <li>POST job.php — enqueue job</li>
+        <li>POST dlq.redrive.php — redrive dead-letter items</li>
+        <li>POST migrate.php — apply schema migrations</li>
+  <li>POST prefix.migrate.php — create cishub_* views (dry_run supported)</li>
+        <li>POST manual.refresh_token.php — refresh OAuth token</li>
+        <li>POST keys.rotate.php — rotate admin/webhook secrets</li>
+        <li>POST transfer.cleanup_cache.php — clear validation cache</li>
+          <li><a href="https://staff.vapeshed.co.nz/assets/services/queue/public/transfer.inspect.php">GET transfer.inspect.php</a> — inspect transfer cache/state</li>
+        <li>POST <a href="https://staff.vapeshed.co.nz/assets/services/queue/public/webhook.test.php">webhook.test.php</a> — send signed test webhook</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h3>Webhooks</h3>
+      <ul>
+        <li>POST <code>webhook.php</code> — Lightspeed → CIS (HMAC required)</li>
+        <li><a href="https://staff.vapeshed.co.nz/assets/services/queue/public/webhook.subscriptions.php">GET webhook.subscriptions.php</a></li>
+        <li>POST webhook.subscriptions.update.php — update subscription</li>
+        <li><a href="https://staff.vapeshed.co.nz/assets/services/queue/public/webhook.events.php?limit=50">GET webhook.events.php?limit=50</a></li>
+        <li><a href="https://staff.vapeshed.co.nz/assets/services/queue/public/webhook.health.php">GET webhook.health.php</a></li>
+        <li><a href="https://staff.vapeshed.co.nz/assets/services/queue/public/webhook.stats.php">GET webhook.stats.php</a></li>
+        <li>POST webhook.replay.php — replay events</li>
+      </ul>
+    </div>
+  </div>
+
+  <p class="muted">Tip: Import the <a href="https://staff.vapeshed.co.nz/assets/services/queue/docs/Queue_API_Postman_Collection.json">Postman collection</a> to get prebuilt requests.</p>
+</body>
+</html>
