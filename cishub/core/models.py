@@ -254,7 +254,7 @@ class SystemStatus(Base):
     # Additional data
     version = Column(String(50))
     environment = Column(String(50))
-    metadata = Column(JSON)
+    additional_metadata = Column(JSON)
     
     def __repr__(self):
         return f"<SystemStatus(operational={self.is_operational}, health='{self.overall_health}')>"
@@ -287,7 +287,7 @@ class AuditLog(Base):
     timestamp = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
     
     # Additional data
-    metadata = Column(JSON)
+    additional_metadata = Column(JSON)
     tags = Column(JSON)
     
     # Indexes

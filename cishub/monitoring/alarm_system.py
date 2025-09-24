@@ -9,8 +9,8 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Any, Callable, Set
 from enum import Enum
 from dataclasses import dataclass, asdict
-from email.mime.text import MimeText
-from email.mime.multipart import MimeMultipart
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 import httpx
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -180,14 +180,14 @@ class EmailNotificationChannel(NotificationChannel):
         
         try:
             # Create email message
-            msg = MimeMultipart()
+            msg = MIMEMultipart()
             msg['From'] = self.username
             msg['To'] = ', '.join(self.recipients)
             msg['Subject'] = f"CISHub Alarm: {alarm_event.title}"
             
             # Build email body
             body = self._build_email_body(alarm_event, alarm_id)
-            msg.attach(MimeText(body, 'html'))
+            msg.attach(MIMEText(body, 'html'))
             
             # Send email
             await asyncio.get_event_loop().run_in_executor(
@@ -204,7 +204,7 @@ class EmailNotificationChannel(NotificationChannel):
                 self.logger.log_error(e, "email_notification_failed", alarm_id=alarm_id)
             return False
     
-    def _send_smtp_email(self, msg: MimeMultipart) -> None:
+    def _send_smtp_email(self, msg: MIMEMultipart) -> None:
         """Send email via SMTP."""
         server = smtplib.SMTP(self.smtp_host, self.smtp_port)
         server.starttls()

@@ -175,7 +175,7 @@ class DatabaseManager(LoggerMixin):
             self._sync_engine.dispose()
         
         if self._async_engine:
-            asyncio.create_task(self._async_engine.aclose())
+            asyncio.create_task(self._async_engine.dispose())
         
         self._initialized = False
         self.log_operation("database_connections_closed")
