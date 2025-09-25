@@ -80,6 +80,13 @@ final class HttpClient
             return ['status'=>200, 'headers'=>['Content-Type'=>'application/json'], 'body'=>$body];
         }
 
+        // Normalize known misplaced API endpoints (e.g., 2.1 -> 2.0 registers) before building URL
+        $originalPath = $path;
+        $path = self::normalizeEndpointPath($path, $didRewrite);
+        if (!empty($didRewrite)) {
+            try { \Queue\Logger::info('vend.http.rewrite', ['meta' => ['from' => $originalPath, 'to' => $path]]); } catch (\Throwable $e) { /* best-effort */ }
+        }
+
         $url = (stripos($path, 'http') === 0) ? $path : (rtrim(self::vendorBase(), '/') . '/' . ltrim($path, '/'));
 
         // Circuit breaker
@@ -138,7 +145,7 @@ final class HttpClient
             throw new \RuntimeException($errstr !== '' ? $errstr : ('curl_error #' . $errno));
         }
 
-        $status     = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $status     = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $headerSize = (int)curl_getinfo($ch, CURLINFO_HEADER_SIZE);
         $rawHead    = substr($raw, 0, $headerSize);
         $rawBody    = substr($raw, $headerSize);
@@ -161,6 +168,20 @@ final class HttpClient
                     'x_request_id' => $respHeaders['X-Request-ID'] ?? ($respHeaders['X-Correlation-ID'] ?? ($respHeaders['x-request-id'] ?? ($respHeaders['x-correlation-id'] ?? null))),
                 ]]);
             } catch (\Throwable $logE) { /* best-effort */ }
+        }
+
+        // 404 fallback: if we hit the known bad 2.1 registers path and rewriting is enabled, retry with 2.0 once
+        if ($status === 404 && empty($didRewrite)) {
+            $enable = (bool)(Config::get('vend.http_rewrite.fix_registers_21_to_20', true) ?? true);
+            if ($enable && preg_match('#/api/2\.1/(registers)(?:/|\?|$)#', $url)) {
+                $newUrl = preg_replace('#/api/2\.1/#', '/api/2.0/', $url, 1);
+                if (is_string($newUrl) && $newUrl !== $url) {
+                    try { \Queue\Logger::info('vend.http.rewrite.retry', ['meta' => ['from' => $url, 'to' => $newUrl]]); } catch (\Throwable $e) {}
+                    $url = $newUrl;
+                    $didRewrite = true; // guard against loops
+                    goto retry;
+                }
+            }
         }
 
         // 401: refresh token once then retry
@@ -224,6 +245,33 @@ final class HttpClient
         if ($status === 409) return ['status'=>200,'headers'=>$respHeaders,'body'=>$body];
 
         return ['status'=>$status, 'headers'=>$respHeaders, 'body'=>$body];
+    }
+
+    /**
+     * Rewrites known incorrect API versions to their correct counterparts.
+     * Currently: ensures registers endpoint uses /api/2.0/ to avoid 404 churn from /api/2.1/.
+     *
+     * Accepts either a path (e.g., "/api/2.1/registers") or a full URL.
+     * Returns the rewritten string. Sets $didRewrite=true if a change occurred.
+     */
+    private static function normalizeEndpointPath(string $input, ?bool &$didRewrite = null): string
+    {
+        $didRewrite = false;
+        // Targeted fix: registers endpoint exists under 2.0, not 2.1 for our tenant usage
+        // Apply replacement for any occurrence, preserving query/fragment automatically with string replacement.
+        // Only replace exact segment "/api/2.1/registers" (optionally followed by /, ?, or end of string)
+        $enable = (bool)(Config::get('vend.http_rewrite.fix_registers_21_to_20', true) ?? true);
+        if ($enable) {
+            $pattern = '#/api/2\.1/(registers)(?=\b|/|\?|$)#';
+            if (preg_match($pattern, $input)) {
+                $output = preg_replace('#/api/2\.1/#', '/api/2.0/', $input, 1);
+                if (is_string($output) && $output !== $input) {
+                    $didRewrite = true;
+                    return $output;
+                }
+            }
+        }
+        return $input;
     }
 
     private static function parseHeaders(string $raw): array

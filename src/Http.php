@@ -5,6 +5,19 @@ namespace Queue;
 
 final class Http
 {
+    /** Return true if the caller requested pretty JSON (via ?pretty=1 or X-Pretty: 1). */
+    public static function wantsPretty(): bool
+    {
+        try {
+            $qp = isset($_GET['pretty']) ? strtolower((string)$_GET['pretty']) : '';
+            if ($qp === '1' || $qp === 'true' || $qp === 'yes') return true;
+        } catch (\Throwable $e) {}
+        try {
+            $hp = isset($_SERVER['HTTP_X_PRETTY']) ? strtolower((string)$_SERVER['HTTP_X_PRETTY']) : '';
+            if ($hp === '1' || $hp === 'true' || $hp === 'yes') return true;
+        } catch (\Throwable $e) {}
+        return false;
+    }
     public static function requestId(): string
     {
         static $rid = null;
@@ -82,14 +95,37 @@ final class Http
         $sysName = null; $dev = [];
         try { $sysName = (string)(Config::get('system.name', 'CISHUB') ?? 'CISHUB'); } catch (\Throwable $e) {}
         try { if (class_exists('\\Queue\\DevFlags')) { $dev = \Queue\DevFlags::active(); } } catch (\Throwable $e) {}
-        echo json_encode([
+        // Compute full request URL (best-effort)
+        $url = null;
+        try {
+            $scheme = ((isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] && strtolower((string)$_SERVER['HTTPS']) !== 'off') ? 'https' : 'http');
+            $host = $_SERVER['HTTP_HOST'] ?? ($_SERVER['SERVER_NAME'] ?? null);
+            $uri  = $_SERVER['REQUEST_URI'] ?? ($_SERVER['PHP_SELF'] ?? '/');
+            if ($host) { $url = $scheme . '://' . $host . $uri; }
+        } catch (\Throwable $e) { $url = null; }
+
+        $payload = [
             'ok' => $ok,
             'data' => $ok ? ($data ?? []) : null,
             'error' => $ok ? null : ($error ?? ['code' => 'unknown_error', 'message' => 'Unknown error']),
+            'status' => $status,
             'request_id' => self::requestId(),
+            'timestamp' => date('c'),
             'system' => $sysName ? ['name' => $sysName] : null,
             'dev_flags' => $dev,
-        ]);
+            'url' => $url,
+        ];
+
+        $flags = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE;
+        if (self::wantsPretty()) { $flags |= JSON_PRETTY_PRINT; }
+        $json = json_encode($payload, $flags);
+        if ($json === false) {
+            // Fallback minimal error-safe envelope
+            $json = '{"ok":false,"error":{"code":"json_encode_failed"},"request_id":"' . self::requestId() . '"}';
+        }
+        // Best-effort content length (harmless if output buffering modifies size later)
+        try { header('Content-Length: ' . strlen($json) + 1); } catch (\Throwable $e) {}
+        echo $json, "\n";
     }
 
     public static function error(string $code, string $message, ?array $details = null, int $status = 400): void
@@ -108,10 +144,30 @@ final class Http
 
     public static function ensureAuth(): bool
     {
-        // INCIDENT MODE: HTTP auth fully disabled as requested. All requests are allowed.
-        // Note: This bypasses bearer checks entirely, including for write endpoints.
-        // Ensure this is reverted when incident ends.
-        return true;
+        // CLI always allowed
+        if (PHP_SAPI === 'cli') { return true; }
+        // Incident bypass (default true to preserve current behavior until toggled off)
+        try { if (\Queue\Config::getBool('queue.incident_mode', true)) { return true; } } catch (\Throwable $e) { return true; }
+
+        // Simple bearer/internal-key enforcement when not in incident mode
+        $authz = $_SERVER['HTTP_AUTHORIZATION'] ?? ($_SERVER['Authorization'] ?? '');
+        $bearer = '';
+        if ($authz && stripos($authz, 'Bearer ') === 0) { $bearer = trim((string)substr($authz, 7)); }
+        $cfgBearer = '';
+        try { $cfgBearer = (string)(\Queue\Config::get('queue.api.bearer', '') ?? ''); } catch (\Throwable $e) {}
+
+        $xKey = $_SERVER['HTTP_X_INTERNAL_KEY'] ?? '';
+        $cfgKey = '';
+        try { $cfgKey = (string)(\Queue\Config::get('queue.internal.key', '') ?? ''); } catch (\Throwable $e) {}
+
+        $ok = false;
+        if ($cfgBearer !== '' && $bearer !== '' && hash_equals($cfgBearer, $bearer)) { $ok = true; }
+        if (!$ok && $cfgKey !== '' && $xKey !== '' && hash_equals($cfgKey, $xKey)) { $ok = true; }
+        if ($ok) { return true; }
+
+        header('WWW-Authenticate: Bearer realm="CIS"');
+        self::error('unauthorized', 'Authentication required', null, 401);
+        return false;
     }
 
     public static function rateLimit(string $route, int $limitPerMinute = 60): bool
